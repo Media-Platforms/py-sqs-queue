@@ -8,14 +8,14 @@ except(IOError, ImportError):
 
 
 setup(
-    name='sqs_consumer',
+    name='sqs_queue',
     version='0.1.0',
-    description='AWS SQS queue consumer',
+    description='AWS SQS queue consumer/publisher',
     author='Nic Wolff',
     author_email='nwolff@hearst.com',
     license='MIT',
     long_description=long_description,
-    url='http://github.com/HearstCorp/py-sqs-consumer',
+    url='http://github.com/HearstCorp/py-sqs-queue',
     packages=find_packages(),
     install_requires=['boto3']
 )
