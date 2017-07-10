@@ -5,11 +5,12 @@ import boto3
 
 class Queue(object):
 
-    def __init__(self, queue_name, poll_wait=20, poll_sleep=40, **kwargs):
+    def __init__(self, queue_name, poll_wait=20, poll_sleep=40, drain=False,  **kwargs):
         sqs = boto3.resource('sqs')
         self.queue = sqs.get_queue_by_name(QueueName=queue_name, **kwargs)
         self.poll_wait = poll_wait
         self.poll_sleep = poll_sleep
+        self.drain = drain
 
     def __iter__(self):
         self.consumer = self.queue_consumer()
@@ -25,6 +26,8 @@ class Queue(object):
                 else:
                     message.delete()
             if not messages:
+                if self.drain:
+                    raise StopIteration
                 sleep(self.poll_sleep)
 
     def publish(self, body, **kwargs):
