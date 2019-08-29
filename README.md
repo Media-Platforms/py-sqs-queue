@@ -47,9 +47,6 @@ sleep for 40 seconds before trying again. Those time intervals are configurable:
 queue = Queue('YOUR_QUEUE_NAME', poll_wait=20, poll_sleep=40)
 ```
 
-Behind the scenes, the generator is polling DispatchR for new messages. When the queue is empty, it will sleep for 40 seconds before trying again. That time interval is configurable:
-
-
 ### `drain`
 
 Normally, once the queue is empty, the generator waits for more messages. If you just want to process all existing messages and quit, you can pass this boolean parameter:
