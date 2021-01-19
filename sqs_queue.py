@@ -48,7 +48,7 @@ class Queue(object):
                     message.delete()
             if not messages:
                 if self.drain:
-                    raise StopIteration
+                    return
                 sleep(self.poll_sleep)
 
     def publish(self, body, **kwargs):
