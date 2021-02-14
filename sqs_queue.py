@@ -12,13 +12,14 @@ class Queue(object):
     got_sigterm = False
 
     def __init__(self, queue_name, poll_wait=20, poll_sleep=40, sns=False, drain=False,
-                 trap_sigterm=True, **kwargs):
+                 batch=True, trap_sigterm=True, **kwargs):
         sqs = boto3.resource('sqs')
         self.queue = sqs.get_queue_by_name(QueueName=queue_name, **kwargs)
         self.poll_wait = poll_wait
         self.poll_sleep = poll_sleep
         self.sns = sns
         self.drain = drain
+        self.batch = batch
 
         if trap_sigterm:
             signal(SIGTERM, self.make_sigterm_handler())
@@ -29,8 +30,23 @@ class Queue(object):
 
     def queue_consumer(self):
         while not self.got_sigterm:
-            messages = self.queue.receive_messages(WaitTimeSeconds=self.poll_wait)
+            messages = self.queue.receive_messages(
+                MaxNumberOfMessages=10 if self.batch else 1,
+                WaitTimeSeconds=self.poll_wait,
+            )
+
+            unprocessed = []
+
             for message in messages:
+                if self.got_sigterm:
+                    unprocessed.append(
+                        {
+                            'Id': str(len(unprocessed)),
+                            'ReceiptHandle': message.receipt_handle,
+                            'VisibilityTimeout': 0
+                        }
+                    )
+                    continue
                 try:
                     body = json.loads(message.body)
                 except ValueError:
@@ -52,12 +68,17 @@ class Queue(object):
                     yield
                 else:
                     message.delete()
+
             if not messages:
                 if self.drain:
                     return
                 sleep(self.poll_sleep)
 
-        logger.info('Got SIGTERM earlier, finished processing message and now exiting')
+            if unprocessed:
+                self.queue.change_message_visibility_batch(Entries=unprocessed)
+
+        logger.info('Got SIGTERM, exiting')
+
 
     def publish(self, body, **kwargs):
         self.queue.send_message(MessageBody=body, **kwargs)
@@ -66,7 +87,7 @@ class Queue(object):
         existing_handler = getsignal(SIGTERM)
 
         def set_terminate_flag(signum, frame):
-            logger.info('Got SIGTERM, will exit after processing this message')
+            logger.info('Got SIGTERM, will exit after this batch')
             self.got_sigterm = True
             if callable(existing_handler):
                 existing_handler(signum, frame)
