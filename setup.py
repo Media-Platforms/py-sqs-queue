@@ -9,7 +9,7 @@ except(IOError, ImportError):
 
 setup(
     name='sqs_queue',
-    version='0.3.0',
+    version='0.4.0',
     description='AWS SQS queue consumer/publisher',
     author='Nic Wolff',
     author_email='nwolff@hearst.com',
