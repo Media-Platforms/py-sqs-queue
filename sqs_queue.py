@@ -39,19 +39,15 @@ class Queue(object):
 
             for message in messages:
                 if self.got_sigterm:
-                    unprocessed.append(
-                        {
-                            'Id': str(len(unprocessed)),
-                            'ReceiptHandle': message.receipt_handle,
-                            'VisibilityTimeout': 0
-                        }
-                    )
+                    unprocessed.append(message.receipt_handle)
                     continue
+
                 try:
                     body = json.loads(message.body)
                 except ValueError:
                     logger.warn('SQS message body is not valid JSON, skipping')
                     continue
+
                 if self.sns:
                     try:
                         message_id = body['MessageId']
@@ -63,6 +59,7 @@ class Queue(object):
                     except KeyError as e:
                         logger.warn('SQS message JSON has no "%s" key, skipping', e)
                         continue
+
                 leave_in_queue = yield Message(body, self)
                 if leave_in_queue:
                     yield
@@ -75,10 +72,14 @@ class Queue(object):
                 sleep(self.poll_sleep)
 
             if unprocessed:
-                self.queue.change_message_visibility_batch(Entries=unprocessed)
+                logger.info('Putting %s messages back in queue', len(unprocessed))
+                entries = [
+                    {'Id': str(i), 'ReceiptHandle': handle, 'VisibilityTimeout': 0}
+                    for i, handle in enumerate(unprocessed)
+                ]
+                self.queue.change_message_visibility_batch(Entries=entries)
 
         logger.info('Got SIGTERM, exiting')
-
 
     def publish(self, body, **kwargs):
         self.queue.send_message(MessageBody=body, **kwargs)
