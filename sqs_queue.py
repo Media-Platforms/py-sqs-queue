@@ -12,8 +12,8 @@ class Queue(object):
     got_sigterm = False
 
     def __init__(self, queue_name, poll_wait=20, poll_sleep=40, sns=False, drain=False,
-                 batch=True, trap_sigterm=True, **kwargs):
-        sqs = boto3.resource('sqs')
+                 batch=True, trap_sigterm=True, endpoint_url=None, **kwargs):
+        sqs = boto3.resource('sqs', endpoint_url=endpoint_url)
         self.queue = sqs.get_queue_by_name(QueueName=queue_name, **kwargs)
         self.poll_wait = poll_wait
         self.poll_sleep = poll_sleep
