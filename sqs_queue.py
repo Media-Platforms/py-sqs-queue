@@ -14,7 +14,7 @@ class Queue(object):
     def __init__(self, queue_name=None, queue=None, poll_wait=20, poll_sleep=40, sns=False,
                  drain=False, batch=True, trap_sigterm=True, endpoint_url=None, **kwargs):
         if not queue_name and not queue:
-            raise Exception('Must provide "queue" resource or "queue_name" parameter')
+            raise ValueError('Must provide "queue" resource or "queue_name" parameter')
         if queue_name:
             sqs = boto3.resource('sqs', endpoint_url=endpoint_url)
             queue = sqs.get_queue_by_name(QueueName=queue_name, **kwargs)
