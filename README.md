@@ -30,6 +30,17 @@ And, you can publish to the queue as well:
 queue.publish({'MessageId': 123, 'Message': '{"foo": "bar"}'})
 ```
 
+If you already have a boto3 queue resource, pass this instead of a name:
+
+```py
+import boto3
+from sqs_queue import Queue
+
+queue_resource = boto3.resource('sqs').Queue('YOUR_QUEUE_NAME')
+
+my_queue = Queue(queue=queue_resource)
+```
+
 ## Configuration
 
 You can put your AWS credentials in environment variables or [any of the other places boto3 looks](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html).
