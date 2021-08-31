@@ -37,6 +37,8 @@ class Queue(object):
             messages = self.queue.receive_messages(
                 MaxNumberOfMessages=10 if self.batch else 1,
                 WaitTimeSeconds=self.poll_wait,
+                MessageAttributeNames=['All'],
+                AttributeNames=['All']
             )
 
             unprocessed = []
@@ -49,7 +51,7 @@ class Queue(object):
                 try:
                     body = json.loads(message.body)
                 except ValueError:
-                    logger.warn('SQS message body is not valid JSON, skipping')
+                    logger.warning('SQS message body is not valid JSON, skipping')
                     continue
 
                 if self.sns:
@@ -58,13 +60,13 @@ class Queue(object):
                         body = json.loads(body['Message'])
                         body['sns_message_id'] = message_id
                     except ValueError:
-                        logger.warn('SNS "Message" in SQS message body is not valid JSON, skipping')
+                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping')
                         continue
                     except KeyError as e:
-                        logger.warn('SQS message JSON has no "%s" key, skipping', e)
+                        logger.warning('SQS message JSON has no "%s" key, skipping', e)
                         continue
 
-                leave_in_queue = yield Message(body, self)
+                leave_in_queue = yield Message(body, self, message)
                 if leave_in_queue:
                     yield
                 else:
@@ -102,10 +104,11 @@ class Queue(object):
 
 class Message(dict):
 
-    def __init__(self, body, queue):
+    def __init__(self, body, queue, sqs_message=None):
         dict.__init__(self)
         self.update(body)
         self.queue = queue
+        self.sqs_message = sqs_message
 
     def defer(self):
         self.queue.consumer.send(True)
