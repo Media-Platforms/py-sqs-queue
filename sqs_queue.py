@@ -39,10 +39,10 @@ class Queue(object):
             logger.debug('Receiving messages from queue %s (max count: %s, wait time: %ds)',
                          self.queue.url, max_count, self.poll_wait)
             messages = self.queue.receive_messages(
-                AttributeNames=['ApproximateFirstReceiveTimestamp', 'ApproximateReceiveCount',
-                                'MessageGroupId', 'SentTimestamp'],
                 MaxNumberOfMessages=max_count,
                 WaitTimeSeconds=self.poll_wait,
+                MessageAttributeNames=['All'],
+                AttributeNames=['All']
             )
             logger.info('Received %d messages from queue %s ', len(messages), self.queue.url)
 
@@ -68,7 +68,7 @@ class Queue(object):
                 try:
                     body = json.loads(message.body)
                 except ValueError:
-                    logger.warn('SQS message body is not valid JSON, skipping')
+                    logger.warning('SQS message body is not valid JSON, skipping')
                     continue
 
                 if self.sns:
@@ -77,13 +77,13 @@ class Queue(object):
                         body = json.loads(body['Message'])
                         body['sns_message_id'] = message_id
                     except ValueError:
-                        logger.warn('SNS "Message" in SQS message body is not valid JSON, skipping')
+                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping')
                         continue
                     except KeyError as e:
-                        logger.warn('SQS message JSON has no "%s" key, skipping', e)
+                        logger.warning('SQS message JSON has no "%s" key, skipping', e)
                         continue
 
-                leave_in_queue = yield Message(body, message.message_id, self)
+                leave_in_queue = yield Message(body, self, message)
                 if leave_in_queue:
                     logger.debug('Leaving SQS message "%s" in queue', message.message_id)
                     yield
@@ -124,11 +124,11 @@ class Queue(object):
 
 class Message(dict):
 
-    def __init__(self, body, sqs_message_id, queue):
+    def __init__(self, body, queue, sqs_message=None):
         dict.__init__(self)
         self.update(body)
-        self.sqs_message_id = sqs_message_id
         self.queue = queue
+        self.sqs_message = sqs_message
 
     def defer(self):
         self.queue.consumer.send(True)
