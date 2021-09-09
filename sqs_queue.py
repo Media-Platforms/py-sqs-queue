@@ -74,8 +74,10 @@ class Queue(object):
                 if self.sns:
                     try:
                         message_id = body['MessageId']
+                        sequence_number = body.get('SequenceNumber')
                         body = json.loads(body['Message'])
                         body['sns_message_id'] = message_id
+                        body['sns_sequence_number'] = sequence_number
                     except ValueError:
                         logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping')
                         continue
