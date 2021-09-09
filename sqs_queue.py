@@ -8,6 +8,10 @@ import boto3
 
 logger = getLogger(__name__)
 
+def utc_from_timestamp(message, attribute):
+    ts = message.attributes.get(attribute)
+    return datetime.utcfromtimestamp(int(ts) / 1000) if ts else None
+
 
 class Queue(object):
     got_sigterm = False
@@ -49,16 +53,12 @@ class Queue(object):
             unprocessed = []
 
             for message in messages:
-                first_received = message.attributes.get('ApproximateFirstReceiveTimestamp')
-                sent_timestamp = message.attributes.get('SentTimestamp')
                 logger.debug('Processing SQS message "%s" (first received: %s, receive count: %s, '
                              'sent timestamp: %s, message group id: %s)',
                              message.message_id,
-                             datetime.utcfromtimestamp(int(first_received) / 1000) \
-                                if first_received else None,
+                             utc_from_timestamp(message, 'ApproximateFirstReceiveTimestamp'),
                              message.attributes.get('ApproximateReceiveCount'),
-                             datetime.utcfromtimestamp(int(sent_timestamp) / 1000) \
-                                if sent_timestamp else None,
+                             utc_from_timestamp(message, 'SentTimestamp'),
                              message.attributes.get('MessageGroupId'),
                              )
                 if self.got_sigterm:
