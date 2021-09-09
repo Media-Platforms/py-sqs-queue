@@ -34,10 +34,14 @@ class Queue(object):
 
     def queue_consumer(self):
         while not self.got_sigterm:
+            max_count = 10 if self.batch else 1
+            logger.debug('Receiving messages from queue %s (max count: %s, wait time: %ds)',
+                         self.queue.url, max_count, self.poll_wait)
             messages = self.queue.receive_messages(
-                MaxNumberOfMessages=10 if self.batch else 1,
+                MaxNumberOfMessages=max_count,
                 WaitTimeSeconds=self.poll_wait,
             )
+            logger.info('Received %d messages from queue %s', len(messages), self.queue.url)
 
             unprocessed = []
 
@@ -64,15 +68,18 @@ class Queue(object):
                         logger.warn('SQS message JSON has no "%s" key, skipping', e)
                         continue
 
-                leave_in_queue = yield Message(body, self)
+                leave_in_queue = yield Message(body, message.message_id, self)
                 if leave_in_queue:
+                    logger.debug('Leaving SQS message "%s" in queue', message.message_id)
                     yield
                 else:
+                    logger.debug('Deleting SQS message "%s" from queue', message.message_id)
                     message.delete()
 
             if not messages:
                 if self.drain:
                     return
+                logger.debug('Sleeping for %ds between polls', self.poll_sleep)
                 sleep(self.poll_sleep)
 
             if unprocessed:
@@ -102,9 +109,10 @@ class Queue(object):
 
 class Message(dict):
 
-    def __init__(self, body, queue):
+    def __init__(self, body, sqs_message_id, queue):
         dict.__init__(self)
         self.update(body)
+        self.sqs_message_id = sqs_message_id
         self.queue = queue
 
     def defer(self):
