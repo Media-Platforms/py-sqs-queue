@@ -53,14 +53,16 @@ class Queue(object):
             unprocessed = []
 
             for message in messages:
-                logger.debug('Processing SQS message "%s" (first received: %s, receive count: %s, '
-                             'sent timestamp: %s, message group id: %s)',
-                             message.message_id,
-                             utc_from_timestamp(message, 'ApproximateFirstReceiveTimestamp'),
-                             message.attributes.get('ApproximateReceiveCount'),
-                             utc_from_timestamp(message, 'SentTimestamp'),
-                             message.attributes.get('MessageGroupId'),
-                             )
+                logger.debug(
+                    'Processing SQS message ID "%s" '
+                    '(sent at: %s, first received at: %s, '
+                    'receive count: %s, message group ID: %s)',
+                    message.message_id,
+                    utc_from_timestamp(message, 'SentTimestamp'),
+                    utc_from_timestamp(message, 'ApproximateFirstReceiveTimestamp'),
+                    message.attributes.get('ApproximateReceiveCount'),
+                    message.attributes.get('MessageGroupId')
+                )
                 if self.got_sigterm:
                     unprocessed.append(message.receipt_handle)
                     continue
