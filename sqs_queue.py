@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from logging import getLogger
 from signal import SIGTERM, getsignal, signal
 from time import sleep
@@ -38,14 +39,28 @@ class Queue(object):
             logger.debug('Receiving messages from queue %s (max count: %s, wait time: %ds)',
                          self.queue.url, max_count, self.poll_wait)
             messages = self.queue.receive_messages(
+                AttributeNames=['ApproximateFirstReceiveTimestamp', 'ApproximateReceiveCount',
+                                'MessageGroupId', 'SentTimestamp'],
                 MaxNumberOfMessages=max_count,
                 WaitTimeSeconds=self.poll_wait,
             )
-            logger.info('Received %d messages from queue %s', len(messages), self.queue.url)
+            logger.info('Received %d messages from queue %s ', len(messages), self.queue.url)
 
             unprocessed = []
 
             for message in messages:
+                first_received = message.attributes.get('ApproximateFirstReceiveTimestamp')
+                sent_timestamp = message.attributes.get('SentTimestamp')
+                logger.debug('Processing SQS message "%s" (first received: %s, receive count: %s, '
+                             'sent timestamp: %s, message group id: %s)',
+                             message.message_id,
+                             datetime.utcfromtimestamp(int(first_received) / 1000) \
+                                if first_received else None,
+                             message.attributes.get('ApproximateReceiveCount'),
+                             datetime.utcfromtimestamp(int(sent_timestamp) / 1000) \
+                                if sent_timestamp else None,
+                             message.attributes.get('MessageGroupId'),
+                             )
                 if self.got_sigterm:
                     unprocessed.append(message.receipt_handle)
                     continue
