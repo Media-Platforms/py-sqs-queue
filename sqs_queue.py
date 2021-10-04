@@ -49,7 +49,7 @@ class Queue(object):
                 MessageAttributeNames=['All'],
                 AttributeNames=['All']
             )
-            logger.info('[receive] Received messages from queue message_count=%d, queue_url=%s',
+            logger.info('[receive] Received messages from queue queue_url=%s, message_count=%d',
                         len(messages), self.queue.url)
 
             unprocessed = []
@@ -72,7 +72,8 @@ class Queue(object):
                 try:
                     body = json.loads(message.body)
                 except ValueError:
-                    logger.warning('[process] SQS message body is not valid JSON, skipping')
+                    logger.warning('[process] SQS message body is not valid JSON, skipping message_id=%s',
+                                   message.message_id)
                     continue
 
                 if self.sns:
@@ -85,10 +86,12 @@ class Queue(object):
                         body['sns_sequence_number'] = sequence_number
                         body['sns_timestamp'] = timestamp
                     except ValueError:
-                        logger.warning('[process] SNS "Message" in SQS message body is not valid JSON, skipping')
+                        logger.warning('[process] SNS "Message" in SQS message body is not valid JSON, skipping'
+                                       'message_id=%s', message.message_id)
                         continue
                     except KeyError as e:
-                        logger.warning('[process] SQS message JSON has no required key, skipping key=%s', e)
+                        logger.warning('[process] SQS message JSON is missing required key, skipping key=%s '
+                                       'message_id=%s', e, message.message_id)
                         continue
 
                 leave_in_queue = yield Message(body, self, message)
@@ -102,11 +105,11 @@ class Queue(object):
             if not messages:
                 if self.drain:
                     return
-                logger.debug('[process] Sleeping between polls poll_sleep=%ds', self.poll_sleep)
+                logger.debug('[settings] Sleeping between polls poll_sleep=%ds', self.poll_sleep)
                 sleep(self.poll_sleep)
 
             if unprocessed:
-                logger.info('[process] Putting messages back in queue message_count=%s', len(unprocessed))
+                logger.info('[overall_process] Putting messages back in queue message_count=%d', len(unprocessed))
                 entries = [
                     {'Id': str(i), 'ReceiptHandle': handle, 'VisibilityTimeout': 0}
                     for i, handle in enumerate(unprocessed)
