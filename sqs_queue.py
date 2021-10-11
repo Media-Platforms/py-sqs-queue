@@ -50,7 +50,7 @@ class Queue(object):
                 AttributeNames=['All']
             )
             logger.info('[receive] Received messages from queue queue_url=%s, message_count=%d',
-                        len(messages), self.queue.url)
+                        self.queue.url, len(messages))
 
             unprocessed = []
 
