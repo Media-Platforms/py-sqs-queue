@@ -41,7 +41,7 @@ class Queue(object):
     def queue_consumer(self):
         while not self.got_sigterm:
             max_count = 10 if self.batch else 1
-            logger.debug('[receive] Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds',
+            logger.debug('Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds',
                          self.queue.url, max_count, self.poll_wait)
             messages = self.queue.receive_messages(
                 MaxNumberOfMessages=max_count,
@@ -49,14 +49,14 @@ class Queue(object):
                 MessageAttributeNames=['All'],
                 AttributeNames=['All']
             )
-            logger.info('[receive] Received messages from queue queue_url=%s, message_count=%d',
+            logger.info('Received messages from queue queue_url=%s, message_count=%d',
                         self.queue.url, len(messages))
 
             unprocessed = []
 
             for message in messages:
                 logger.debug(
-                    '[process] Processing SQS message_id=%s, '
+                    'Processing SQS message_id=%s, '
                     'sent_at=%s, first_received_at=%s, '
                     'receive_count=%s, message_group_id=%s',
                     message.message_id,
@@ -72,7 +72,7 @@ class Queue(object):
                 try:
                     body = json.loads(message.body)
                 except ValueError:
-                    logger.warning('[process] SQS message body is not valid JSON, skipping message_id=%s',
+                    logger.warning('SQS message body is not valid JSON, skipping message_id=%s',
                                    message.message_id)
                     continue
 
@@ -86,37 +86,37 @@ class Queue(object):
                         body['sns_sequence_number'] = sequence_number
                         body['sns_timestamp'] = timestamp
                     except ValueError:
-                        logger.warning('[process] SNS "Message" in SQS message body is not valid JSON, skipping'
+                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping'
                                        'message_id=%s', message.message_id)
                         continue
                     except KeyError as e:
-                        logger.warning('[process] SQS message JSON is missing required key, skipping key=%s '
+                        logger.warning('SQS message JSON is missing required key, skipping key=%s '
                                        'message_id=%s', e, message.message_id)
                         continue
 
                 leave_in_queue = yield Message(body, self, message)
                 if leave_in_queue:
-                    logger.debug('[process] Leaving SQS message in queue message_id=%s', message.message_id)
+                    logger.debug('Leaving SQS message in queue message_id=%s', message.message_id)
                     yield
                 else:
-                    logger.debug('[process] Deleting SQS message from queue message_id=%s', message.message_id)
+                    logger.debug('Deleting SQS message from queue message_id=%s', message.message_id)
                     message.delete()
 
             if not messages:
                 if self.drain:
                     return
-                logger.debug('[settings] Sleeping between polls poll_sleep=%ds', self.poll_sleep)
+                logger.debug('Sleeping between polls poll_sleep=%ds', self.poll_sleep)
                 sleep(self.poll_sleep)
 
             if unprocessed:
-                logger.info('[overall_process] Putting messages back in queue message_count=%d', len(unprocessed))
+                logger.info('Putting messages back in queue message_count=%d', len(unprocessed))
                 entries = [
                     {'Id': str(i), 'ReceiptHandle': handle, 'VisibilityTimeout': 0}
                     for i, handle in enumerate(unprocessed)
                 ]
                 self.queue.change_message_visibility_batch(Entries=entries)
 
-        logger.info('[SIGTERM] Got SIGTERM, exiting')
+        logger.info('Got SIGTERM, exiting')
 
     def publish(self, body, **kwargs):
         self.queue.send_message(MessageBody=body, **kwargs)
@@ -125,7 +125,7 @@ class Queue(object):
         existing_handler = getsignal(SIGTERM)
 
         def set_terminate_flag(signum, frame):
-            logger.info('[SIGTERM] Got SIGTERM, will exit after this batch')
+            logger.info('Got SIGTERM, will exit after this batch')
             self.got_sigterm = True
             if callable(existing_handler):
                 existing_handler(signum, frame)
