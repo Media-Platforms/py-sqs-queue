@@ -8,6 +8,7 @@ import boto3
 
 logger = getLogger(__name__)
 
+
 def utc_from_timestamp(message, attribute):
     ts = message.attributes.get(attribute)
     return datetime.utcfromtimestamp(int(ts) / 1000) if ts else None
@@ -40,7 +41,7 @@ class Queue(object):
     def queue_consumer(self):
         while not self.got_sigterm:
             max_count = 10 if self.batch else 1
-            logger.debug('Receiving messages from queue %s (max count: %s, wait time: %ds)',
+            logger.debug('Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds',
                          self.queue.url, max_count, self.poll_wait)
             messages = self.queue.receive_messages(
                 MaxNumberOfMessages=max_count,
@@ -48,15 +49,16 @@ class Queue(object):
                 MessageAttributeNames=['All'],
                 AttributeNames=['All']
             )
-            logger.info('Received %d messages from queue %s ', len(messages), self.queue.url)
+            logger.info('Received messages from queue queue_url=%s, message_count=%d',
+                        self.queue.url, len(messages))
 
             unprocessed = []
 
             for message in messages:
                 logger.debug(
-                    'Processing SQS message ID "%s" '
-                    '(sent at: %s, first received at: %s, '
-                    'receive count: %s, message group ID: %s)',
+                    'Processing SQS message_id=%s, '
+                    'sent_at=%s, first_received_at=%s, '
+                    'receive_count=%s, message_group_id=%s',
                     message.message_id,
                     utc_from_timestamp(message, 'SentTimestamp'),
                     utc_from_timestamp(message, 'ApproximateFirstReceiveTimestamp'),
@@ -70,7 +72,8 @@ class Queue(object):
                 try:
                     body = json.loads(message.body)
                 except ValueError:
-                    logger.warning('SQS message body is not valid JSON, skipping')
+                    logger.warning('SQS message body is not valid JSON, skipping message_id=%s',
+                                   message.message_id)
                     continue
 
                 if self.sns:
@@ -83,28 +86,30 @@ class Queue(object):
                         body['sns_sequence_number'] = sequence_number
                         body['sns_timestamp'] = timestamp
                     except ValueError:
-                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping')
+                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping'
+                                       'message_id=%s', message.message_id)
                         continue
                     except KeyError as e:
-                        logger.warning('SQS message JSON has no "%s" key, skipping', e)
+                        logger.warning('SQS message JSON is missing required key, skipping key=%s '
+                                       'message_id=%s', e, message.message_id)
                         continue
 
                 leave_in_queue = yield Message(body, self, message)
                 if leave_in_queue:
-                    logger.debug('Leaving SQS message "%s" in queue', message.message_id)
+                    logger.debug('Leaving SQS message in queue message_id=%s', message.message_id)
                     yield
                 else:
-                    logger.debug('Deleting SQS message "%s" from queue', message.message_id)
+                    logger.debug('Deleting SQS message from queue message_id=%s', message.message_id)
                     message.delete()
 
             if not messages:
                 if self.drain:
                     return
-                logger.debug('Sleeping for %ds between polls', self.poll_sleep)
+                logger.debug('Sleeping between polls poll_sleep=%ds', self.poll_sleep)
                 sleep(self.poll_sleep)
 
             if unprocessed:
-                logger.info('Putting %s messages back in queue', len(unprocessed))
+                logger.info('Putting messages back in queue message_count=%d', len(unprocessed))
                 entries = [
                     {'Id': str(i), 'ReceiptHandle': handle, 'VisibilityTimeout': 0}
                     for i, handle in enumerate(unprocessed)
