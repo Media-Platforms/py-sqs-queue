@@ -14,17 +14,31 @@ def utc_from_timestamp(message, attribute):
     return datetime.utcfromtimestamp(int(ts) / 1000) if ts else None
 
 
+class Message(dict):
+
+    def __init__(self, body, queue, sqs_message=None):
+        dict.__init__(self)
+        self.update(body)
+        self.queue = queue
+        self.sqs_message = sqs_message
+
+    def defer(self):
+        self.queue.consumer.send(True)
+
+
 class Queue(object):
     got_sigterm = False
 
-    def __init__(self, queue_name=None, queue=None, poll_wait=20, poll_sleep=40, sns=False,
-                 drain=False, batch=True, trap_sigterm=True, endpoint_url=None, **kwargs):
+    def __init__(self, queue_name=None, queue=None, message_class=Message, poll_wait=20,
+                 poll_sleep=40, sns=False, drain=False, batch=True, trap_sigterm=True,
+                 endpoint_url=None, **kwargs):
         if not queue_name and not queue:
             raise ValueError('Must provide "queue" resource or "queue_name" parameter')
         if queue_name:
             sqs = boto3.resource('sqs', endpoint_url=endpoint_url)
             queue = sqs.get_queue_by_name(QueueName=queue_name, **kwargs)
         self.queue = queue
+        self.message_class = message_class
         self.poll_wait = poll_wait
         self.poll_sleep = poll_sleep
         self.sns = sns
@@ -94,7 +108,7 @@ class Queue(object):
                                        'message_id=%s', e, message.message_id)
                         continue
 
-                leave_in_queue = yield Message(body, self, message)
+                leave_in_queue = yield self.message_class(body, self, message)
                 if leave_in_queue:
                     logger.debug('Leaving SQS message in queue message_id=%s', message.message_id)
                     yield
@@ -131,15 +145,3 @@ class Queue(object):
                 existing_handler(signum, frame)
 
         return set_terminate_flag
-
-
-class Message(dict):
-
-    def __init__(self, body, queue, sqs_message=None):
-        dict.__init__(self)
-        self.update(body)
-        self.queue = queue
-        self.sqs_message = sqs_message
-
-    def defer(self):
-        self.queue.consumer.send(True)
