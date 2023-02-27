@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='sqs_queue',
-    version='0.6.3',
+    version='0.6.4',
     description='AWS SQS queue consumer/publisher',
     author='Nic Wolff',
     author_email='nwolff@hearst.com',
