@@ -100,7 +100,12 @@ class Queue(object):
                     yield
                 else:
                     logger.debug('Deleting SQS message from queue message_id=%s', message.message_id)
-                    message.delete()
+                    try:
+                        message.delete()
+                    except Exception as e:
+                        logger.warning('Unable to delete SQS message_id=%s, error=%s',
+                                       message.message_id, e)
+
 
             if not messages:
                 if self.drain:
