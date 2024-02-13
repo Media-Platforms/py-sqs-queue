@@ -18,7 +18,8 @@ class Queue(object):
     got_sigterm = False
 
     def __init__(self, queue_name=None, queue=None, poll_wait=20, poll_sleep=40, sns=False,
-                 drain=False, batch=True, trap_sigterm=True, endpoint_url=None, **kwargs):
+                 drain=False, batch=True, trap_sigterm=True, endpoint_url=None,
+                 visibility_timeout=None, **kwargs):
         if not queue_name and not queue:
             raise ValueError('Must provide "queue" resource or "queue_name" parameter')
         if queue_name:
@@ -30,6 +31,7 @@ class Queue(object):
         self.sns = sns
         self.drain = drain
         self.batch = batch
+        self.visibility_timeout = visibility_timeout
 
         if trap_sigterm:
             signal(SIGTERM, self.make_sigterm_handler())
@@ -41,14 +43,18 @@ class Queue(object):
     def queue_consumer(self):
         while not self.got_sigterm:
             max_count = 10 if self.batch else 1
-            logger.debug('Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds',
-                         self.queue.url, max_count, self.poll_wait)
-            messages = self.queue.receive_messages(
-                MaxNumberOfMessages=max_count,
-                WaitTimeSeconds=self.poll_wait,
-                MessageAttributeNames=['All'],
-                AttributeNames=['All']
-            )
+            logger.debug('Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds, '
+                         'visibility_timeout=%s',
+                         self.queue.url, max_count, self.poll_wait, self.visibility_timeout)
+            config = {
+                'MaxNumberOfMessages': max_count,
+                'WaitTimeSeconds': self.poll_wait,
+                'MessageAttributeNames': ['All'],
+                'AttributeNames': ['All'],
+            }
+            if self.visibility_timeout:
+                config['VisibilityTimeout'] = self.visibility_timeout
+            messages = self.queue.receive_messages(**config)
             logger.debug('Received messages from queue queue_url=%s, message_count=%d',
                          self.queue.url, len(messages))
 
