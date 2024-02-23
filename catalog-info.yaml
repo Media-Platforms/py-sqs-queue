@@ -14,6 +14,8 @@ metadata:
     - url: https://github.com/Media-Platforms/py-sqs-queue/wiki
       title: py-sqs-queue Wiki
       type: documentation
+    - url: https://pypi.org/project/sqs-queue/
+      title: py-sqs-queue Pypi project page
 spec:
   type: library
   lifecycle: production
