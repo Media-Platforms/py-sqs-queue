@@ -25,3 +25,7 @@ jobs:
 
       - name: Run tests
         run: python setup.py test
+
+      - name: Backstage entity validator
+        uses: RoadieHQ/backstage-entity-validator@v0.3.11
+

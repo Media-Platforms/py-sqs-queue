@@ -1,0 +1,22 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: py-sqs-queue
+  description: |
+    Simple Python AWS SQS queue consumer and publisher.
+  tags:
+    - python
+    - sqs
+  annotations:
+    github.com/project-slug: Media-Platforms/py-sqs-queue
+  links:
+    - url: https://github.com/Media-Platforms/py-sqs-queue/wiki
+      title: py-sqs-queue Wiki
+      type: documentation
+    - url: https://pypi.org/project/sqs-queue/
+      title: py-sqs-queue Pypi project page
+spec:
+  type: library
+  lifecycle: production
+  owner: core-tech
