@@ -76,3 +76,7 @@ If your SQS queue is being fed from an SNS topic, you can pass your Queue this b
 queue = Queue('YOUR_QUEUE_NAME', sns=True)
 ```
 When you use this option, the `sns_message_id` is added to the notification data, which can be used to make sure you only process each message once.
+
+### `create`
+
+When you pass `create=True` then, if your SQS queue name is not found, a queue with that name will be created.
