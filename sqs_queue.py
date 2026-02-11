@@ -9,11 +9,6 @@ import boto3
 logger = getLogger(__name__)
 
 
-def utc_from_timestamp(message, attribute):
-    ts = message.attributes.get(attribute)
-    return datetime.fromtimestamp(int(ts) / 1000, timezone.utc) if ts else None
-
-
 class Queue(object):
     got_sigterm = False
 
@@ -200,3 +195,8 @@ class Message(dict):
 
     def defer(self):
         self.queue.consumer.send(True)
+
+
+def utc_from_timestamp(message, attribute):
+    ts = message.attributes.get(attribute)
+    return datetime.fromtimestamp(int(ts) / 1000, timezone.utc) if ts else None
