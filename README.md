@@ -45,14 +45,13 @@ my_queue = Queue(queue=queue_resource)
 
 You can put your AWS credentials in environment variables or [any of the other places boto3 looks](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html).
 
-## Parameters
+Other parameters can be passed into the `Queue()` initiator, or set with environment variables prefixed by `SQS_QUEUE_`, e.g. `SQS_QUEUE_POLL_WAIT`.
 
+## Parameters
 
 ### `poll_wait` and `poll_sleep`
 
-Behind the scenes, the generator is polling SQS for new messages. When the queue is empty, that
-call will wait up to 20 seconds for new messages, and if it times out before any arrive it will
-sleep for 40 seconds before trying again. Those time intervals are configurable:
+Behind the scenes, the generator is polling SQS for new messages. When the queue is empty, that call will wait up to 20 seconds for new messages, and if it times out before any arrive it will sleep for 40 seconds before trying again. Those time intervals are configurable:
 
 ```py
 queue = Queue('YOUR_QUEUE_NAME', poll_wait=20, poll_sleep=40)

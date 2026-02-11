@@ -5,6 +5,7 @@ from signal import SIGTERM, getsignal, signal
 from time import sleep
 
 import boto3
+from cast_from_env import from_env
 
 logger = getLogger(__name__)
 
@@ -15,8 +16,10 @@ class Queue(object):
     def __init__(self, queue_name=None, queue=None, bulk_queue=None, poll_wait=20, poll_sleep=40,
                  sns=False, drain=False, batch=True, trap_sigterm=True, endpoint_url=None,
                  create=False, **kwargs):
+
         if not queue_name and not queue:
             raise ValueError('Must provide "queue" resource or "queue_name" parameter')
+
         if queue_name:
             sqs = boto3.resource('sqs', endpoint_url=endpoint_url)
             try:
@@ -25,16 +28,22 @@ class Queue(object):
                 if not create:
                     raise
                 queue = sqs.create_queue(QueueName=queue_name, **kwargs)
+
         self.queue = queue
         self.bulk_queue = bulk_queue
-        self.poll_wait = poll_wait
-        self.poll_sleep = poll_sleep
-        self.sns = sns
-        self.drain = drain
-        self.batch = batch
+
+        self.set_from_env('poll_wait', poll_wait)
+        self.set_from_env('poll_sleep', poll_sleep)
+        self.set_from_env('sns', sns)
+        self.set_from_env('drain', drain)
+        self.set_from_env('batch', batch)
 
         if trap_sigterm:
             signal(SIGTERM, self.make_sigterm_handler())
+
+    def set_from_env(self, var, default):
+        value = from_env(f'SQS_QUEUE_{var}'.upper(), default)
+        setattr(self, var.lower(), value)
 
     def __iter__(self):
         self.consumer = self.queue_consumer()

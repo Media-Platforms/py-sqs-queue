@@ -11,5 +11,5 @@ setup(
     long_description_content_type="text/markdown",
     url='http://github.com/Media-Platforms/py-sqs-queue',
     py_modules=['sqs_queue'],
-    install_requires=['boto3']
+    install_requires=['boto3', 'cast_from_env']
 )
