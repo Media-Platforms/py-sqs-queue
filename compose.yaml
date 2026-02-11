@@ -1,0 +1,19 @@
+services:
+  localstack:
+    image: localstack/localstack:4.3
+    environment:
+      - SERVICES=sqs
+    ports:
+      - "4566:4566"
+
+  ipython:
+    build: .
+    stdin_open: true
+    tty: true
+    depends_on:
+      - localstack
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
