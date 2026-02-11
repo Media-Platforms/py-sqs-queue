@@ -808,6 +808,15 @@ class TestQueuePublish(TestCase):
             MessageGroupId='group1'
         )
 
+    def test_converts_dict_to_json(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            q.publish({'key': 'value', 'number': 42})
+        mock_queue.send_message.assert_called_once_with(
+            MessageBody='{"key": "value", "number": 42}'
+        )
+
 
 class TestMakeSigtermHandler(TestCase):
 
