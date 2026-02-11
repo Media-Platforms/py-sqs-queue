@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from signal import SIGTERM, SIG_DFL
 from unittest import TestCase
 from unittest.mock import MagicMock, patch, call
@@ -14,7 +14,7 @@ class TestUtcFromTimestamp(TestCase):
         message.attributes = {'SentTimestamp': '1609459200000'}  # 2021-01-01 00:00:00 UTC
         result = utc_from_timestamp(message, 'SentTimestamp')
         self.assertIsInstance(result, datetime)
-        self.assertEqual(result, datetime(2021, 1, 1, 0, 0, 0))
+        self.assertEqual(result, datetime(2021, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
 
     def test_returns_none_when_attribute_missing(self):
         message = MagicMock()
