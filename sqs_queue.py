@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from logging import getLogger
 from signal import SIGTERM, getsignal, signal
 from time import sleep
@@ -11,7 +11,7 @@ logger = getLogger(__name__)
 
 def utc_from_timestamp(message, attribute):
     ts = message.attributes.get(attribute)
-    return datetime.utcfromtimestamp(int(ts) / 1000) if ts else None
+    return datetime.fromtimestamp(int(ts) / 1000, timezone.utc) if ts else None
 
 
 class Queue(object):
