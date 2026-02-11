@@ -1,10 +1,14 @@
 import json
+import logging
 from datetime import datetime, timezone
 from signal import SIGTERM, SIG_DFL
 from unittest import TestCase
 from unittest.mock import MagicMock, patch, call
 
 from sqs_queue import Message, Queue, utc_from_timestamp
+
+# Disable all logging output for the entire test suite
+logging.disable(logging.CRITICAL)
 
 
 class TestUtcFromTimestamp(TestCase):
