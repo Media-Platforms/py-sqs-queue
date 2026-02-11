@@ -180,6 +180,8 @@ class Queue(object):
             return None
 
     def publish(self, body, **kwargs):
+        if isinstance(body, dict):
+            body = json.dumps(body)
         self.queue.send_message(MessageBody=body, **kwargs)
 
     def make_sigterm_handler(self):
