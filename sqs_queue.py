@@ -17,9 +17,9 @@ def utc_from_timestamp(message, attribute):
 class Queue(object):
     got_sigterm = False
 
-    def __init__(self, queue_name=None, queue=None, poll_wait=20, poll_sleep=40, sns=False,
-                 drain=False, batch=True, trap_sigterm=True, endpoint_url=None, create=False,
-                 **kwargs):
+    def __init__(self, queue_name=None, queue=None, bulk_queue=None, poll_wait=20, poll_sleep=40,
+                 sns=False, drain=False, batch=True, trap_sigterm=True, endpoint_url=None,
+                 create=False, **kwargs):
         if not queue_name and not queue:
             raise ValueError('Must provide "queue" resource or "queue_name" parameter')
         if queue_name:
@@ -31,6 +31,7 @@ class Queue(object):
                     raise
                 queue = sqs.create_queue(QueueName=queue_name, **kwargs)
         self.queue = queue
+        self.bulk_queue = bulk_queue
         self.poll_wait = poll_wait
         self.poll_sleep = poll_sleep
         self.sns = sns
@@ -49,75 +50,11 @@ class Queue(object):
             max_count = 10 if self.batch else 1
             logger.debug('Receiving messages from queue queue_url=%s, max_count=%s, wait_time=%ds',
                          self.queue.url, max_count, self.poll_wait)
-            messages = self.queue.receive_messages(
-                MaxNumberOfMessages=max_count,
-                WaitTimeSeconds=self.poll_wait,
-                MessageAttributeNames=['All'],
-                AttributeNames=['All']
-            )
+            messages = self.receive(max_count, wait=self.poll_wait)
             logger.debug('Received messages from queue queue_url=%s, message_count=%d',
                          self.queue.url, len(messages))
 
-            unprocessed = []
-
-            for message in messages:
-                logger.debug(
-                    'Processing SQS message_id=%s, '
-                    'sent_at=%s, first_received_at=%s, '
-                    'receive_count=%s, message_group_id=%s',
-                    message.message_id,
-                    utc_from_timestamp(message, 'SentTimestamp'),
-                    utc_from_timestamp(message, 'ApproximateFirstReceiveTimestamp'),
-                    message.attributes.get('ApproximateReceiveCount'),
-                    message.attributes.get('MessageGroupId')
-                )
-                if self.got_sigterm:
-                    unprocessed.append(message.receipt_handle)
-                    continue
-
-                try:
-                    body = json.loads(message.body)
-                except ValueError:
-                    logger.warning('SQS message body is not valid JSON, skipping message_id=%s',
-                                   message.message_id)
-                    continue
-
-                if self.sns:
-                    try:
-                        message_id = body['MessageId']
-                        sequence_number = body.get('SequenceNumber')
-                        timestamp = body.get('Timestamp')
-                        body = json.loads(body['Message'])
-                        body['sns_message_id'] = message_id
-                        body['sns_sequence_number'] = sequence_number
-                        body['sns_timestamp'] = timestamp
-                    except ValueError:
-                        logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping'
-                                       'message_id=%s', message.message_id)
-                        continue
-                    except KeyError as e:
-                        logger.warning('SQS message JSON is missing required key, skipping key=%s '
-                                       'message_id=%s', e, message.message_id)
-                        continue
-
-                leave_in_queue = yield Message(body, self, message)
-                if leave_in_queue:
-                    logger.debug('Leaving SQS message in queue message_id=%s', message.message_id)
-                    yield
-                else:
-                    logger.debug('Deleting SQS message from queue message_id=%s', message.message_id)
-                    try:
-                        message.delete()
-                    except Exception as e:
-                        logger.warning('Unable to delete SQS message_id=%s, error=%s',
-                                       message.message_id, e)
-
-
-            if not messages:
-                if self.drain:
-                    return
-                logger.debug('Sleeping between polls poll_sleep=%ds', self.poll_sleep)
-                sleep(self.poll_sleep)
+            unprocessed = yield from self._process_messages(messages)
 
             if unprocessed:
                 logger.info('Putting messages back in queue message_count=%d', len(unprocessed))
@@ -127,7 +64,116 @@ class Queue(object):
                 ]
                 self.queue.change_message_visibility_batch(Entries=entries)
 
+            if not messages:
+                if self.bulk_queue:
+                    logger.debug('Primary queue empty, checking bulk queue')
+                    bulk_messages = self.bulk_queue.receive(max_count)
+                    if bulk_messages:
+                        logger.info('Received %d messages from bulk queue', len(bulk_messages))
+                        yield from self._process_messages(bulk_messages)
+                        continue
+                if self.drain:
+                    return
+                logger.debug('Sleeping between polls poll_sleep=%ds', self.poll_sleep)
+                sleep(self.poll_sleep)
+
         logger.info('Got SIGTERM, exiting')
+
+    def _process_messages(self, messages):
+        """Yield messages to consumer, handle SNS unwrapping and deletion.
+
+        Returns list of unprocessed receipt handles (for SIGTERM handling).
+        """
+        unprocessed = []
+        for message in messages:
+            sqs_message = message.sqs_message
+            logger.debug(
+                'Processing SQS message_id=%s, '
+                'sent_at=%s, first_received_at=%s, '
+                'receive_count=%s, message_group_id=%s',
+                sqs_message.message_id,
+                utc_from_timestamp(sqs_message, 'SentTimestamp'),
+                utc_from_timestamp(sqs_message, 'ApproximateFirstReceiveTimestamp'),
+                sqs_message.attributes.get('ApproximateReceiveCount'),
+                sqs_message.attributes.get('MessageGroupId')
+            )
+            if self.got_sigterm:
+                unprocessed.append(sqs_message.receipt_handle)
+                continue
+
+            if self.sns and not self._unwrap_sns(message):
+                continue
+
+            leave_in_queue = yield message
+            if leave_in_queue:
+                logger.debug('Leaving SQS message in queue message_id=%s',
+                             sqs_message.message_id)
+                yield
+            else:
+                self._delete_message(message)
+
+        return unprocessed
+
+    def _unwrap_sns(self, message):
+        """Unwrap SNS message envelope in place. Returns True on success."""
+        try:
+            sns_message_id = message['MessageId']
+            sns_sequence_number = message.get('SequenceNumber')
+            sns_timestamp = message.get('Timestamp')
+            inner_body = json.loads(message['Message'])
+            message.clear()
+            message.update(inner_body)
+            message['sns_message_id'] = sns_message_id
+            message['sns_sequence_number'] = sns_sequence_number
+            message['sns_timestamp'] = sns_timestamp
+            return True
+        except ValueError:
+            logger.warning('SNS "Message" in SQS message body is not valid JSON, skipping'
+                           'message_id=%s', message.sqs_message.message_id)
+            return False
+        except KeyError as e:
+            logger.warning('SQS message JSON is missing required key, skipping key=%s '
+                           'message_id=%s', e, message.sqs_message.message_id)
+            return False
+
+    def _delete_message(self, message):
+        """Delete a message from its queue."""
+        sqs_message = message.sqs_message
+        logger.debug('Deleting SQS message from queue message_id=%s', sqs_message.message_id)
+        try:
+            sqs_message.delete()
+        except Exception as e:
+            logger.warning('Unable to delete SQS message_id=%s, error=%s',
+                           sqs_message.message_id, e)
+
+    def receive(self, max_count=10, wait=0):
+        """Receive up to max_count messages from the queue.
+
+        Args:
+            max_count: Maximum number of messages to receive (1-10).
+            wait: Seconds to wait for messages (0 for non-blocking).
+        """
+        sqs_messages = self.queue.receive_messages(
+            MaxNumberOfMessages=max_count,
+            WaitTimeSeconds=wait,
+            MessageAttributeNames=['All'],
+            AttributeNames=['All']
+        )
+        messages = []
+        for sqs_message in sqs_messages:
+            body = self._parse_json(sqs_message)
+            if body is not None:
+                messages.append(Message(body, self, sqs_message))
+        return messages
+
+    def _parse_json(self, sqs_message):
+        """Parse JSON body from SQS message. Returns None if invalid."""
+        try:
+            return json.loads(sqs_message.body)
+        except ValueError:
+            logger.warning('SQS message body is not valid JSON, skipping message_id=%s',
+                           sqs_message.message_id)
+            return None
 
     def publish(self, body, **kwargs):
         self.queue.send_message(MessageBody=body, **kwargs)

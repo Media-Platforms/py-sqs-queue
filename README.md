@@ -80,3 +80,36 @@ When you use this option, the `sns_message_id` is added to the notification data
 ### `create`
 
 When you pass `create=True` then, if your SQS queue name is not found, a queue with that name will be created.
+
+### `bulk_queue`
+
+You can pass this option another `Queue`, which will be checked only when the primary "priority" queue is empty. For example:
+
+```
+In [1]:   from sqs_queue import Queue
+
+In [2]:   bulk = Queue(
+   ...:       queue_name='bulk',
+   ...:       create=True,
+   ...:       poll_wait=2
+   ...:   )
+
+In [3]:   primary = Queue(
+   ...:       queue_name='primary',
+   ...:       bulk_queue=bulk,
+   ...:       drain=True,
+   ...:       create=True,
+   ...:       poll_wait=2
+   ...:   )
+
+In [5]:   primary.publish('{"type": "priority", "id": 1}')
+   ...:   bulk.publish('{"type": "bulk", "id": 1}')
+   ...:   bulk.publish('{"type": "bulk", "id": 2}')
+
+In [6]:   for msg in primary:
+   ...:       print(msg)
+
+{'type': 'priority', 'id': 1}
+{'type': 'bulk', 'id': 1}
+{'type': 'bulk', 'id': 2}
+```
