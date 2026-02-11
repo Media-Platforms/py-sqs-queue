@@ -152,6 +152,46 @@ class TestQueueInit(TestCase):
         self.assertIsNone(q.bulk_queue)
 
 
+class TestSetFromEnv(TestCase):
+
+    def test_uses_default_when_env_var_not_set(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {}, clear=True):
+                q = Queue(queue=mock_queue, poll_wait=25)
+        self.assertEqual(q.poll_wait, 25)
+
+    def test_uses_env_var_when_set(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_POLL_WAIT': '99'}):
+                q = Queue(queue=mock_queue, poll_wait=25)
+        self.assertEqual(q.poll_wait, 99)
+
+    def test_env_var_overrides_default_for_poll_sleep(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_POLL_SLEEP': '120'}):
+                q = Queue(queue=mock_queue, poll_sleep=40)
+        self.assertEqual(q.poll_sleep, 120)
+
+    def test_set_from_env_converts_var_name_to_uppercase(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            with patch.dict('os.environ', {'SQS_QUEUE_TEST_VAR': '42'}):
+                q.set_from_env('test_var', 0)
+        self.assertEqual(q.test_var, 42)
+
+    def test_set_from_env_stores_attribute_lowercase(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            with patch.dict('os.environ', {'SQS_QUEUE_MY_SETTING': 'hello'}):
+                q.set_from_env('MY_SETTING', 'default')
+        self.assertEqual(q.my_setting, 'hello')
+
+
 class TestQueueIter(TestCase):
 
     def test_returns_consumer_generator(self):
