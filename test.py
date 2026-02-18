@@ -130,13 +130,15 @@ class TestQueueInit(TestCase):
                 poll_sleep=20,
                 sns=True,
                 drain=True,
-                batch=False
+                batch=False,
+                bulk_queue_check_pct=50
             )
         self.assertEqual(q.poll_wait, 10)
         self.assertEqual(q.poll_sleep, 20)
         self.assertTrue(q.sns)
         self.assertTrue(q.drain)
         self.assertFalse(q.batch)
+        self.assertEqual(q.bulk_queue_check_pct, 50)
 
     def test_stores_bulk_queue(self):
         mock_queue = MagicMock()
@@ -150,6 +152,12 @@ class TestQueueInit(TestCase):
         with patch('sqs_queue.signal'):
             q = Queue(queue=mock_queue)
         self.assertIsNone(q.bulk_queue)
+
+    def test_bulk_queue_check_pct_defaults_to_zero(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        self.assertEqual(q.bulk_queue_check_pct, 0)
 
 
 class TestSetFromEnv(TestCase):
@@ -182,6 +190,13 @@ class TestSetFromEnv(TestCase):
             with patch.dict('os.environ', {'SQS_QUEUE_TEST_VAR': '42'}):
                 q.set_from_env('test_var', 0)
         self.assertEqual(q.test_var, 42)
+
+    def test_env_var_overrides_bulk_queue_check_pct(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_BULK_QUEUE_CHECK_PCT': '25'}):
+                q = Queue(queue=mock_queue, bulk_queue_check_pct=0)
+        self.assertEqual(q.bulk_queue_check_pct, 25)
 
     def test_set_from_env_stores_attribute_lowercase(self):
         mock_queue = MagicMock()
@@ -555,6 +570,87 @@ class TestQueueConsumer(TestCase):
             q.got_sigterm = False
             consumer = iter(q)
             # Process first message - bulk_queue should not be checked yet
+            next(consumer)
+        mock_bulk_queue.receive.assert_not_called()
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_yields_messages(self, mock_random):
+        mock_random.return_value = 0.5
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_bulk_queue = MagicMock()
+        mock_bulk_sqs = MagicMock()
+        mock_bulk_sqs.message_id = 'bulk-1'
+        bulk_msg = Message(
+            {'bulk': 1}, mock_bulk_queue, mock_bulk_sqs
+        )
+        mock_bulk_queue.receive.side_effect = [[bulk_msg], []]
+        mock_queue.receive_messages.side_effect = [
+            [mock_message], []
+        ]
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=100,
+                drain=True
+            )
+            q.got_sigterm = False
+            messages = list(q)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]['key'], 'value')
+        self.assertEqual(messages[1]['bulk'], 1)
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_no_bulk_messages(self, mock_random):
+        mock_random.return_value = 0.5
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_bulk_queue = MagicMock()
+        mock_bulk_queue.receive.return_value = []
+        mock_queue.receive_messages.side_effect = [
+            [mock_message], []
+        ]
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=100,
+                drain=True
+            )
+            q.got_sigterm = False
+            messages = list(q)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['key'], 'value')
+        mock_bulk_queue.receive.assert_any_call(10)
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_skipped_above_threshold(
+        self, mock_random
+    ):
+        mock_random.return_value = 0.51
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_queue.receive_messages.return_value = [mock_message]
+        mock_bulk_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=50,
+                drain=True
+            )
+            q.got_sigterm = False
+            consumer = iter(q)
             next(consumer)
         mock_bulk_queue.receive.assert_not_called()
 

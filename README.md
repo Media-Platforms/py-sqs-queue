@@ -112,3 +112,17 @@ In [6]:   for msg in primary:
 {'type': 'bulk', 'id': 1}
 {'type': 'bulk', 'id': 2}
 ```
+
+### `bulk_queue_check_pct`
+
+When using `bulk_queue`, the bulk queue is normally only checked when the primary queue is empty. With `bulk_queue_check_pct`, you can also randomly check the bulk queue after a percentage of non-empty primary queue polls:
+
+```py
+primary = Queue(
+    queue_name='primary',
+    bulk_queue=bulk,
+    bulk_queue_check_pct=25
+)
+```
+
+This will check the bulk queue after approximately 25% of primary queue polls that returned messages, helping prevent bulk messages from being starved when the primary queue is continuously busy.

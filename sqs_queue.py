@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from logging import getLogger
+from random import random
 from signal import SIGTERM, getsignal, signal
 from time import sleep
 
@@ -13,9 +14,10 @@ logger = getLogger(__name__)
 class Queue(object):
     got_sigterm = False
 
-    def __init__(self, queue_name=None, queue=None, bulk_queue=None, poll_wait=20, poll_sleep=40,
-                 sns=False, drain=False, batch=True, trap_sigterm=True, endpoint_url=None,
-                 create=False, **kwargs):
+    def __init__(self, queue_name=None, queue=None, bulk_queue=None,
+                 bulk_queue_check_pct=0, poll_wait=20, poll_sleep=40,
+                 sns=False, drain=False, batch=True, trap_sigterm=True,
+                 endpoint_url=None, create=False, **kwargs):
 
         if not queue_name and not queue:
             raise ValueError('Must provide "queue" resource or "queue_name" parameter')
@@ -37,6 +39,7 @@ class Queue(object):
         self.set_from_env('sns', sns)
         self.set_from_env('drain', drain)
         self.set_from_env('batch', batch)
+        self.set_from_env('bulk_queue_check_pct', bulk_queue_check_pct)
 
         if trap_sigterm:
             signal(SIGTERM, self.make_sigterm_handler())
@@ -67,6 +70,19 @@ class Queue(object):
                     for i, handle in enumerate(unprocessed)
                 ]
                 self.queue.change_message_visibility_batch(Entries=entries)
+
+            if messages and self.bulk_queue and self.bulk_queue_check_pct:
+                if random() * 100 < self.bulk_queue_check_pct:
+                    logger.debug('Random bulk queue check triggered')
+                    bulk_messages = self.bulk_queue.receive(max_count)
+                    if bulk_messages:
+                        logger.info(
+                            'Received %d messages from bulk queue',
+                            len(bulk_messages)
+                        )
+                        yield from self._process_messages(
+                            bulk_messages
+                        )
 
             if not messages:
                 if self.bulk_queue:
