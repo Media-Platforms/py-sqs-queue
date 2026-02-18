@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='sqs_queue',
-    version='0.6.7',
+    version='1.0.0',
     description='AWS SQS queue consumer/publisher',
     author='Nic Wolff',
     author_email='nwolff@hearst.com',
@@ -11,5 +11,5 @@ setup(
     long_description_content_type="text/markdown",
     url='http://github.com/Media-Platforms/py-sqs-queue',
     py_modules=['sqs_queue'],
-    install_requires=['boto3']
+    install_requires=['boto3', 'cast_from_env']
 )

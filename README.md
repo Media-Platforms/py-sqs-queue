@@ -45,14 +45,13 @@ my_queue = Queue(queue=queue_resource)
 
 You can put your AWS credentials in environment variables or [any of the other places boto3 looks](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html).
 
-## Parameters
+Other parameters can be passed into the `Queue()` initiator, or set with environment variables prefixed by `SQS_QUEUE_`, e.g. `SQS_QUEUE_POLL_WAIT`.
 
+## Parameters
 
 ### `poll_wait` and `poll_sleep`
 
-Behind the scenes, the generator is polling SQS for new messages. When the queue is empty, that
-call will wait up to 20 seconds for new messages, and if it times out before any arrive it will
-sleep for 40 seconds before trying again. Those time intervals are configurable:
+Behind the scenes, the generator is polling SQS for new messages. When the queue is empty, that call will wait up to 20 seconds for new messages, and if it times out before any arrive it will sleep for 40 seconds before trying again. Those time intervals are configurable:
 
 ```py
 queue = Queue('YOUR_QUEUE_NAME', poll_wait=20, poll_sleep=40)
@@ -80,3 +79,50 @@ When you use this option, the `sns_message_id` is added to the notification data
 ### `create`
 
 When you pass `create=True` then, if your SQS queue name is not found, a queue with that name will be created.
+
+### `bulk_queue`
+
+You can pass this option another `Queue`, which will be checked only when the primary "priority" queue is empty. For example:
+
+```
+In [1]:   from sqs_queue import Queue
+
+In [2]:   bulk = Queue(
+   ...:       queue_name='bulk',
+   ...:       create=True,
+   ...:       poll_wait=2
+   ...:   )
+
+In [3]:   primary = Queue(
+   ...:       queue_name='primary',
+   ...:       bulk_queue=bulk,
+   ...:       drain=True,
+   ...:       create=True,
+   ...:       poll_wait=2
+   ...:   )
+
+In [5]:   primary.publish('{"type": "priority", "id": 1}')
+   ...:   bulk.publish('{"type": "bulk", "id": 1}')
+   ...:   bulk.publish('{"type": "bulk", "id": 2}')
+
+In [6]:   for msg in primary:
+   ...:       print(msg)
+
+{'type': 'priority', 'id': 1}
+{'type': 'bulk', 'id': 1}
+{'type': 'bulk', 'id': 2}
+```
+
+### `bulk_queue_check_pct`
+
+When using `bulk_queue`, the bulk queue is normally only checked when the primary queue is empty. With `bulk_queue_check_pct`, you can also randomly check the bulk queue after a percentage of non-empty primary queue polls:
+
+```py
+primary = Queue(
+    queue_name='primary',
+    bulk_queue=bulk,
+    bulk_queue_check_pct=25
+)
+```
+
+This will check the bulk queue after approximately 25% of primary queue polls that returned messages, helping prevent bulk messages from being starved when the primary queue is continuously busy.

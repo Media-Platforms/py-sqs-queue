@@ -1,10 +1,14 @@
 import json
+import logging
 from datetime import datetime, timezone
 from signal import SIGTERM, SIG_DFL
 from unittest import TestCase
 from unittest.mock import MagicMock, patch, call
 
 from sqs_queue import Message, Queue, utc_from_timestamp
+
+# Disable all logging output for the entire test suite
+logging.disable(logging.CRITICAL)
 
 
 class TestUtcFromTimestamp(TestCase):
@@ -126,13 +130,81 @@ class TestQueueInit(TestCase):
                 poll_sleep=20,
                 sns=True,
                 drain=True,
-                batch=False
+                batch=False,
+                bulk_queue_check_pct=50
             )
         self.assertEqual(q.poll_wait, 10)
         self.assertEqual(q.poll_sleep, 20)
         self.assertTrue(q.sns)
         self.assertTrue(q.drain)
         self.assertFalse(q.batch)
+        self.assertEqual(q.bulk_queue_check_pct, 50)
+
+    def test_stores_bulk_queue(self):
+        mock_queue = MagicMock()
+        mock_bulk_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue)
+        self.assertIs(q.bulk_queue, mock_bulk_queue)
+
+    def test_bulk_queue_defaults_to_none(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        self.assertIsNone(q.bulk_queue)
+
+    def test_bulk_queue_check_pct_defaults_to_zero(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        self.assertEqual(q.bulk_queue_check_pct, 0)
+
+
+class TestSetFromEnv(TestCase):
+
+    def test_uses_default_when_env_var_not_set(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {}, clear=True):
+                q = Queue(queue=mock_queue, poll_wait=25)
+        self.assertEqual(q.poll_wait, 25)
+
+    def test_uses_env_var_when_set(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_POLL_WAIT': '99'}):
+                q = Queue(queue=mock_queue, poll_wait=25)
+        self.assertEqual(q.poll_wait, 99)
+
+    def test_env_var_overrides_default_for_poll_sleep(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_POLL_SLEEP': '120'}):
+                q = Queue(queue=mock_queue, poll_sleep=40)
+        self.assertEqual(q.poll_sleep, 120)
+
+    def test_set_from_env_converts_var_name_to_uppercase(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            with patch.dict('os.environ', {'SQS_QUEUE_TEST_VAR': '42'}):
+                q.set_from_env('test_var', 0)
+        self.assertEqual(q.test_var, 42)
+
+    def test_env_var_overrides_bulk_queue_check_pct(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            with patch.dict('os.environ', {'SQS_QUEUE_BULK_QUEUE_CHECK_PCT': '25'}):
+                q = Queue(queue=mock_queue, bulk_queue_check_pct=0)
+        self.assertEqual(q.bulk_queue_check_pct, 25)
+
+    def test_set_from_env_stores_attribute_lowercase(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            with patch.dict('os.environ', {'SQS_QUEUE_MY_SETTING': 'hello'}):
+                q.set_from_env('MY_SETTING', 'default')
+        self.assertEqual(q.my_setting, 'hello')
 
 
 class TestQueueIter(TestCase):
@@ -342,6 +414,246 @@ class TestQueueConsumer(TestCase):
             list(consumer)
         mock_sleep.assert_called_with(30)
 
+    @patch('sqs_queue.sleep')
+    def test_yields_from_bulk_queue_when_main_queue_empty(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_bulk_queue = MagicMock()
+        mock_sqs_msg1 = MagicMock()
+        mock_sqs_msg1.message_id = 'bulk-1'
+        mock_sqs_msg2 = MagicMock()
+        mock_sqs_msg2.message_id = 'bulk-2'
+        bulk_messages = [
+            Message({'bulk': 1}, mock_bulk_queue, mock_sqs_msg1),
+            Message({'bulk': 2}, mock_bulk_queue, mock_sqs_msg2),
+        ]
+        mock_bulk_queue.receive.side_effect = [bulk_messages, []]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False)
+            q.got_sigterm = False
+            # First poll returns empty, second poll after bulk processing also empty
+            mock_queue.receive_messages.side_effect = [[], []]
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            messages = list(q)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]['bulk'], 1)
+        self.assertEqual(messages[1]['bulk'], 2)
+
+    @patch('sqs_queue.sleep')
+    def test_deletes_bulk_queue_messages_after_processing(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_bulk_queue = MagicMock()
+        mock_sqs_msg1 = MagicMock()
+        mock_sqs_msg1.message_id = 'bulk-1'
+        mock_sqs_msg2 = MagicMock()
+        mock_sqs_msg2.message_id = 'bulk-2'
+        bulk_messages = [
+            Message({'bulk': 1}, mock_bulk_queue, mock_sqs_msg1),
+            Message({'bulk': 2}, mock_bulk_queue, mock_sqs_msg2),
+        ]
+        mock_bulk_queue.receive.side_effect = [bulk_messages, []]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False)
+            q.got_sigterm = False
+            mock_queue.receive_messages.side_effect = [[], []]
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            list(q)
+        mock_sqs_msg1.delete.assert_called_once()
+        mock_sqs_msg2.delete.assert_called_once()
+
+    @patch('sqs_queue.sleep')
+    def test_does_not_sleep_after_yielding_bulk_messages(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_bulk_queue = MagicMock()
+        mock_sqs_msg = MagicMock()
+        mock_sqs_msg.message_id = 'bulk-1'
+        bulk_messages = [Message({'bulk': 1}, mock_bulk_queue, mock_sqs_msg)]
+        mock_bulk_queue.receive.side_effect = [bulk_messages, []]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False)
+            q.got_sigterm = False
+            # First poll empty (triggers bulk), second poll empty (triggers sleep)
+            mock_queue.receive_messages.side_effect = [[], []]
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            list(q)
+        # Should have polled twice: once before bulk, once after bulk (then sleep)
+        self.assertEqual(mock_queue.receive_messages.call_count, 2)
+        # Sleep only called once (after second empty poll when bulk is exhausted)
+        mock_sleep.assert_called_once()
+
+    @patch('sqs_queue.sleep')
+    def test_sleeps_when_bulk_queue_empty(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        mock_bulk_queue = MagicMock()
+        mock_bulk_queue.receive.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False)
+            q.got_sigterm = False
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            list(q)
+        # Should sleep since bulk queue had no messages
+        mock_sleep.assert_called_once()
+
+    @patch('sqs_queue.sleep')
+    def test_bulk_queue_receive_called_with_max_count_batch_true(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        mock_bulk_queue = MagicMock()
+        mock_bulk_queue.receive.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False, batch=True)
+            q.got_sigterm = False
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            list(q)
+        # batch=True means max_count=10
+        mock_bulk_queue.receive.assert_called_with(10)
+
+    @patch('sqs_queue.sleep')
+    def test_bulk_queue_receive_called_with_max_count_batch_false(self, mock_sleep):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        mock_bulk_queue = MagicMock()
+        mock_bulk_queue.receive.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=False, batch=False)
+            q.got_sigterm = False
+
+            def set_sigterm(*args):
+                q.got_sigterm = True
+            mock_sleep.side_effect = set_sigterm
+            list(q)
+        # batch=False means max_count=1
+        mock_bulk_queue.receive.assert_called_with(1)
+
+    def test_drain_mode_also_drains_bulk_queue(self):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        mock_bulk_queue = MagicMock()
+        mock_sqs_msg = MagicMock()
+        mock_sqs_msg.message_id = 'bulk-1'
+        bulk_message = Message({'bulk': 1}, mock_bulk_queue, mock_sqs_msg)
+        mock_bulk_queue.receive.side_effect = [[bulk_message], []]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=True)
+            q.got_sigterm = False
+            messages = list(q)
+        # drain=True should also drain bulk_queue
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['bulk'], 1)
+
+    def test_bulk_queue_not_checked_when_main_queue_has_messages(self):
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        # First receive returns message, bulk_queue not checked
+        mock_queue.receive_messages.return_value = [mock_message]
+        mock_bulk_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue, bulk_queue=mock_bulk_queue, drain=True)
+            q.got_sigterm = False
+            consumer = iter(q)
+            # Process first message - bulk_queue should not be checked yet
+            next(consumer)
+        mock_bulk_queue.receive.assert_not_called()
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_yields_messages(self, mock_random):
+        mock_random.return_value = 0.5
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_bulk_queue = MagicMock()
+        mock_bulk_sqs = MagicMock()
+        mock_bulk_sqs.message_id = 'bulk-1'
+        bulk_msg = Message(
+            {'bulk': 1}, mock_bulk_queue, mock_bulk_sqs
+        )
+        mock_bulk_queue.receive.side_effect = [[bulk_msg], []]
+        mock_queue.receive_messages.side_effect = [
+            [mock_message], []
+        ]
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=100,
+                drain=True
+            )
+            q.got_sigterm = False
+            messages = list(q)
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]['key'], 'value')
+        self.assertEqual(messages[1]['bulk'], 1)
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_no_bulk_messages(self, mock_random):
+        mock_random.return_value = 0.5
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_bulk_queue = MagicMock()
+        mock_bulk_queue.receive.return_value = []
+        mock_queue.receive_messages.side_effect = [
+            [mock_message], []
+        ]
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=100,
+                drain=True
+            )
+            q.got_sigterm = False
+            messages = list(q)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['key'], 'value')
+        mock_bulk_queue.receive.assert_any_call(10)
+
+    @patch('sqs_queue.random')
+    def test_random_bulk_check_skipped_above_threshold(
+        self, mock_random
+    ):
+        mock_random.return_value = 0.51
+        mock_queue = MagicMock()
+        mock_message = MagicMock()
+        mock_message.body = '{"key": "value"}'
+        mock_message.message_id = 'msg-1'
+        mock_message.attributes = {}
+        mock_queue.receive_messages.return_value = [mock_message]
+        mock_bulk_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(
+                queue=mock_queue,
+                bulk_queue=mock_bulk_queue,
+                bulk_queue_check_pct=50,
+                drain=True
+            )
+            q.got_sigterm = False
+            consumer = iter(q)
+            next(consumer)
+        mock_bulk_queue.receive.assert_not_called()
+
     def test_puts_unprocessed_messages_back_on_sigterm(self):
         mock_queue = MagicMock()
         mock_message1 = MagicMock()
@@ -401,6 +713,177 @@ class TestQueueConsumer(TestCase):
         self.assertEqual(entries[0]['ReceiptHandle'], 'handle-2')
 
 
+class TestQueueReceive(TestCase):
+
+    def test_receive_returns_messages(self):
+        mock_queue = MagicMock()
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.body = '{"key": "value"}'
+        mock_sqs_message.message_id = 'msg-1'
+        mock_queue.receive_messages.return_value = [mock_sqs_message]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            messages = q.receive()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['key'], 'value')
+        self.assertIs(messages[0].sqs_message, mock_sqs_message)
+
+    def test_receive_uses_wait_time_zero(self):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            q.receive()
+        mock_queue.receive_messages.assert_called_once_with(
+            MaxNumberOfMessages=10,
+            WaitTimeSeconds=0,
+            MessageAttributeNames=['All'],
+            AttributeNames=['All']
+        )
+
+    def test_receive_respects_max_count(self):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            q.receive(max_count=5)
+        mock_queue.receive_messages.assert_called_once_with(
+            MaxNumberOfMessages=5,
+            WaitTimeSeconds=0,
+            MessageAttributeNames=['All'],
+            AttributeNames=['All']
+        )
+
+    def test_receive_skips_invalid_json(self):
+        mock_queue = MagicMock()
+        valid_msg = MagicMock()
+        valid_msg.body = '{"key": "value"}'
+        valid_msg.message_id = 'msg-1'
+        invalid_msg = MagicMock()
+        invalid_msg.body = 'not json'
+        invalid_msg.message_id = 'msg-2'
+        mock_queue.receive_messages.return_value = [valid_msg, invalid_msg]
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            messages = q.receive()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['key'], 'value')
+
+    def test_receive_returns_empty_list_when_no_messages(self):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            messages = q.receive()
+        self.assertEqual(messages, [])
+
+    def test_receive_uses_wait_parameter(self):
+        mock_queue = MagicMock()
+        mock_queue.receive_messages.return_value = []
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            q.receive(max_count=5, wait=20)
+        mock_queue.receive_messages.assert_called_once_with(
+            MaxNumberOfMessages=5,
+            WaitTimeSeconds=20,
+            MessageAttributeNames=['All'],
+            AttributeNames=['All']
+        )
+
+
+class TestParseJson(TestCase):
+
+    def test_returns_parsed_body_for_valid_json(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        message = MagicMock()
+        message.body = '{"key": "value"}'
+        result = q._parse_json(message)
+        self.assertEqual(result, {'key': 'value'})
+
+    def test_returns_none_for_invalid_json(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        message = MagicMock()
+        message.body = 'not valid json'
+        message.message_id = 'msg-1'
+        self.assertIsNone(q._parse_json(message))
+
+
+class TestUnwrapSns(TestCase):
+
+    def test_unwraps_sns_message_in_place(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        mock_sqs_message = MagicMock()
+        message = Message({
+            'MessageId': 'sns-msg-id',
+            'SequenceNumber': '123',
+            'Timestamp': '2021-01-01T00:00:00Z',
+            'Message': '{"data": "test"}'
+        }, q, mock_sqs_message)
+        result = q._unwrap_sns(message)
+        self.assertTrue(result)
+        self.assertEqual(message['data'], 'test')
+        self.assertEqual(message['sns_message_id'], 'sns-msg-id')
+        self.assertEqual(message['sns_sequence_number'], '123')
+        self.assertEqual(message['sns_timestamp'], '2021-01-01T00:00:00Z')
+        self.assertNotIn('MessageId', message)
+        self.assertNotIn('Message', message)
+
+    def test_returns_false_for_invalid_inner_json(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.message_id = 'msg-1'
+        message = Message({
+            'MessageId': 'sns-msg-id',
+            'Message': 'not valid json'
+        }, q, mock_sqs_message)
+        result = q._unwrap_sns(message)
+        self.assertFalse(result)
+
+    def test_returns_false_for_missing_message_id(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.message_id = 'msg-1'
+        message = Message({
+            'Message': '{"data": "test"}'
+        }, q, mock_sqs_message)
+        result = q._unwrap_sns(message)
+        self.assertFalse(result)
+
+
+class TestDeleteMessage(TestCase):
+
+    def test_deletes_sqs_message(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.message_id = 'msg-1'
+        message = Message({'key': 'value'}, q, mock_sqs_message)
+        q._delete_message(message)
+        mock_sqs_message.delete.assert_called_once()
+
+    def test_handles_delete_exception(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.message_id = 'msg-1'
+        mock_sqs_message.delete.side_effect = Exception('delete failed')
+        message = Message({'key': 'value'}, q, mock_sqs_message)
+        # Should not raise
+        q._delete_message(message)
+
+
 class TestQueuePublish(TestCase):
 
     def test_sends_message_to_queue(self):
@@ -419,6 +902,15 @@ class TestQueuePublish(TestCase):
             MessageBody='test',
             DelaySeconds=10,
             MessageGroupId='group1'
+        )
+
+    def test_converts_dict_to_json(self):
+        mock_queue = MagicMock()
+        with patch('sqs_queue.signal'):
+            q = Queue(queue=mock_queue)
+            q.publish({'key': 'value', 'number': 42})
+        mock_queue.send_message.assert_called_once_with(
+            MessageBody='{"key": "value", "number": 42}'
         )
 
 
