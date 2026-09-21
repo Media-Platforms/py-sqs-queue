@@ -74,24 +74,15 @@ class Queue(object):
             if messages and self.bulk_queue and self.bulk_queue_check_pct:
                 if random() * 100 < self.bulk_queue_check_pct:
                     logger.debug('Random bulk queue check triggered')
-                    bulk_messages = self.bulk_queue.receive(
-                        max_count, consumer_queue=self
-                    )
+                    bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self)
                     if bulk_messages:
-                        logger.info(
-                            'Received %d messages from bulk queue',
-                            len(bulk_messages)
-                        )
-                        yield from self._process_messages(
-                            bulk_messages
-                        )
+                        logger.info('Received %d messages from bulk queue', len(bulk_messages))
+                        yield from self._process_messages(bulk_messages)
 
             if not messages:
                 if self.bulk_queue:
                     logger.debug('Primary queue empty, checking bulk queue')
-                    bulk_messages = self.bulk_queue.receive(
-                        max_count, consumer_queue=self
-                    )
+                    bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self)
                     if bulk_messages:
                         logger.info('Received %d messages from bulk queue', len(bulk_messages))
                         yield from self._process_messages(bulk_messages)
