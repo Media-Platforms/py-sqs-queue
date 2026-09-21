@@ -74,20 +74,15 @@ class Queue(object):
             if messages and self.bulk_queue and self.bulk_queue_check_pct:
                 if random() * 100 < self.bulk_queue_check_pct:
                     logger.debug('Random bulk queue check triggered')
-                    bulk_messages = self.bulk_queue.receive(max_count)
+                    bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self)
                     if bulk_messages:
-                        logger.info(
-                            'Received %d messages from bulk queue',
-                            len(bulk_messages)
-                        )
-                        yield from self._process_messages(
-                            bulk_messages
-                        )
+                        logger.info('Received %d messages from bulk queue', len(bulk_messages))
+                        yield from self._process_messages(bulk_messages)
 
             if not messages:
                 if self.bulk_queue:
                     logger.debug('Primary queue empty, checking bulk queue')
-                    bulk_messages = self.bulk_queue.receive(max_count)
+                    bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self)
                     if bulk_messages:
                         logger.info('Received %d messages from bulk queue', len(bulk_messages))
                         yield from self._process_messages(bulk_messages)
@@ -166,13 +161,18 @@ class Queue(object):
             logger.warning('Unable to delete SQS message_id=%s, error=%s',
                            sqs_message.message_id, e)
 
-    def receive(self, max_count=10, wait=0):
+    def receive(self, max_count=10, wait=0, consumer_queue=None):
         """Receive up to max_count messages from the queue.
 
         Args:
             max_count: Maximum number of messages to receive (1-10).
             wait: Seconds to wait for messages (0 for non-blocking).
+            consumer_queue: Queue that owns the consumer iterating messages.
+                When this queue is polled as another Queue's bulk_queue,
+                pass the primary Queue so Message.defer() can reach its
+                consumer. Defaults to self.
         """
+        owner = consumer_queue if consumer_queue is not None else self
         sqs_messages = self.queue.receive_messages(
             MaxNumberOfMessages=max_count,
             WaitTimeSeconds=wait,
@@ -183,7 +183,7 @@ class Queue(object):
         for sqs_message in sqs_messages:
             body = self._parse_json(sqs_message)
             if body is not None:
-                messages.append(Message(body, self, sqs_message))
+                messages.append(Message(body, owner, sqs_message))
         return messages
 
     def _parse_json(self, sqs_message):
