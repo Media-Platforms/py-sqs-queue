@@ -61,4 +61,6 @@ jobs:
           TWINE_USERNAME: "${{ vars.VENOM_USERNAME }}"
           TWINE_PASSWORD: "${{ secrets.VENOM_PASSWORD }}"
           TWINE_NON_INTERACTIVE: "true"
-        run: twine upload dist/* --non-interactive
+        run: |
+          python3 -m pip install --upgrade twine
+          twine upload dist/* --non-interactive
