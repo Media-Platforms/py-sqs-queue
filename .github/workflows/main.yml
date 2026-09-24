@@ -1,17 +1,11 @@
 ---
 name: Build
 on:
-  push:
-    tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
   pull_request:
     branches:
       - master
-  release:
-    types: [created]
 jobs:
   build_and_test:
-    name: build_and_deploy
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,32 +29,3 @@ jobs:
 
       - name: Backstage entity validator
         uses: RoadieHQ/backstage-entity-validator@v0.6.0
-
-  package_and_upload:
-    if: github.event_name == 'release'
-    needs: build_and_test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.14'
-
-      - name: Build package
-        run: |
-          python3 -m pip install --upgrade build
-          python3 -m build
-
-      - name: Publish package
-        env:
-          TWINE_REPOSITORY_URL: "${{ vars.VENOM_REPOSITORY_URL }}"
-          TWINE_USERNAME: "${{ vars.VENOM_USERNAME }}"
-          TWINE_PASSWORD: "${{ secrets.VENOM_PASSWORD }}"
-          TWINE_NON_INTERACTIVE: "true"
-        run: |
-          python3 -m pip install --upgrade twine
-          twine upload dist/* --non-interactive
