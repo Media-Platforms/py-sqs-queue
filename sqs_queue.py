@@ -179,11 +179,14 @@ class Queue(object):
             MessageAttributeNames=['All'],
             AttributeNames=['All']
         )
+        delivered_from_bulk = consumer_queue is not None
         messages = []
         for sqs_message in sqs_messages:
             body = self._parse_json(sqs_message)
             if body is not None:
-                messages.append(Message(body, owner, sqs_message))
+                messages.append(
+                    Message(body, owner, sqs_message, delivered_from_bulk=delivered_from_bulk)
+                )
         return messages
 
     def _parse_json(self, sqs_message):
@@ -214,11 +217,12 @@ class Queue(object):
 
 class Message(dict):
 
-    def __init__(self, body, queue, sqs_message=None):
+    def __init__(self, body, queue, sqs_message=None, delivered_from_bulk=False):
         dict.__init__(self)
         self.update(body)
         self.queue = queue
         self.sqs_message = sqs_message
+        self.delivered_from_bulk = delivered_from_bulk
 
     def defer(self):
         self.queue.consumer.send(True)
