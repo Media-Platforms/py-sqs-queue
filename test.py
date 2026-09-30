@@ -908,6 +908,18 @@ class TestQueueReceive(TestCase):
             messages = bulk.receive(consumer_queue=primary)
         self.assertIs(messages[0].queue, primary)
         self.assertIsNot(messages[0].queue, bulk)
+        self.assertTrue(messages[0].delivered_from_bulk)
+
+    def test_receive_primary_queue_messages_not_marked_bulk(self):
+        mock_queue = MagicMock()
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.body = '{"key": "value"}'
+        mock_sqs_message.message_id = 'msg-1'
+        mock_queue.receive_messages.return_value = [mock_sqs_message]
+        with patch('sqs_queue.signal'):
+            primary = Queue(queue=mock_queue)
+            messages = primary.receive()
+        self.assertFalse(messages[0].delivered_from_bulk)
 
 
 class TestParseJson(TestCase):
