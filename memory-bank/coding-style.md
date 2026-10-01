@@ -8,7 +8,8 @@
 - Example (preferred):
 
 ```python
-bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self)
+bulk_messages = self.bulk_queue.receive(
+    max_count, consumer_queue=self, from_bulk=True)
 logger.info('Received %d messages from bulk queue', len(bulk_messages))
 yield from self._process_messages(bulk_messages)
 ```

@@ -521,7 +521,8 @@ class TestQueueConsumer(TestCase):
             mock_sleep.side_effect = set_sigterm
             list(q)
         # batch=True means max_count=10
-        mock_bulk_queue.receive.assert_called_with(10, consumer_queue=q)
+        mock_bulk_queue.receive.assert_called_with(
+            10, consumer_queue=q, from_bulk=True)
 
     @patch('sqs_queue.sleep')
     def test_bulk_queue_receive_called_with_max_count_batch_false(self, mock_sleep):
@@ -538,7 +539,8 @@ class TestQueueConsumer(TestCase):
             mock_sleep.side_effect = set_sigterm
             list(q)
         # batch=False means max_count=1
-        mock_bulk_queue.receive.assert_called_with(1, consumer_queue=q)
+        mock_bulk_queue.receive.assert_called_with(
+            1, consumer_queue=q, from_bulk=True)
 
     def test_drain_mode_also_drains_bulk_queue(self):
         mock_queue = MagicMock()
@@ -628,7 +630,8 @@ class TestQueueConsumer(TestCase):
             messages = list(q)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]['key'], 'value')
-        mock_bulk_queue.receive.assert_any_call(10, consumer_queue=q)
+        mock_bulk_queue.receive.assert_any_call(
+            10, consumer_queue=q, from_bulk=True)
 
     @patch('sqs_queue.random')
     def test_random_bulk_check_skipped_above_threshold(
@@ -683,6 +686,7 @@ class TestQueueConsumer(TestCase):
             messages = list(primary)
         self.assertEqual(len(messages), 1)
         self.assertIs(messages[0].queue, primary)
+        self.assertTrue(messages[0].delivered_from_bulk)
         self.assertTrue(hasattr(primary, 'consumer'))
         self.assertFalse(hasattr(bulk, 'consumer'))
 
@@ -747,7 +751,8 @@ class TestQueueConsumer(TestCase):
             )
             q.got_sigterm = False
             list(q)
-        mock_bulk_queue.receive.assert_any_call(10, consumer_queue=q)
+        mock_bulk_queue.receive.assert_any_call(
+            10, consumer_queue=q, from_bulk=True)
 
     def test_puts_unprocessed_messages_back_on_sigterm(self):
         mock_queue = MagicMock()
@@ -908,6 +913,18 @@ class TestQueueReceive(TestCase):
             messages = bulk.receive(consumer_queue=primary)
         self.assertIs(messages[0].queue, primary)
         self.assertIsNot(messages[0].queue, bulk)
+        self.assertFalse(messages[0].delivered_from_bulk)
+
+    def test_receive_from_bulk_sets_delivered_from_bulk(self):
+        mock_queue = MagicMock()
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.body = '{"key": "value"}'
+        mock_sqs_message.message_id = 'msg-1'
+        mock_queue.receive_messages.return_value = [mock_sqs_message]
+        with patch('sqs_queue.signal'):
+            bulk = Queue(queue=mock_queue)
+            primary = Queue(queue=MagicMock())
+            messages = bulk.receive(consumer_queue=primary, from_bulk=True)
         self.assertTrue(messages[0].delivered_from_bulk)
 
     def test_receive_primary_queue_messages_not_marked_bulk(self):
