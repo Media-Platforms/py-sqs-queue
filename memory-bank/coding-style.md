@@ -8,11 +8,12 @@
 - Example (preferred):
 
 ```python
-bulk_messages = self.bulk_queue.receive(
-    max_count, consumer_queue=self, from_bulk=True)
+bulk_messages = self.bulk_queue.receive(max_count, consumer_queue=self, from_bulk=True)
 logger.info('Received %d messages from bulk queue', len(bulk_messages))
 yield from self._process_messages(bulk_messages)
 ```
 
 - Wrap only when a single line would exceed 100 characters, or when multi-line form is required for
   readability of large dict/kwarg blocks that already follow that pattern in the file.
+- Agents and other automation should read this file before editing Python in the repo and follow the
+  same one-line-when-it-fits rule.
