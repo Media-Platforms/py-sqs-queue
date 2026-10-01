@@ -683,6 +683,7 @@ class TestQueueConsumer(TestCase):
             messages = list(primary)
         self.assertEqual(len(messages), 1)
         self.assertIs(messages[0].queue, primary)
+        self.assertTrue(messages[0].delivered_from_bulk)
         self.assertTrue(hasattr(primary, 'consumer'))
         self.assertFalse(hasattr(bulk, 'consumer'))
 
@@ -908,6 +909,18 @@ class TestQueueReceive(TestCase):
             messages = bulk.receive(consumer_queue=primary)
         self.assertIs(messages[0].queue, primary)
         self.assertIsNot(messages[0].queue, bulk)
+        self.assertFalse(messages[0].delivered_from_bulk)
+
+    def test_receive_from_bulk_sets_delivered_from_bulk(self):
+        mock_queue = MagicMock()
+        mock_sqs_message = MagicMock()
+        mock_sqs_message.body = '{"key": "value"}'
+        mock_sqs_message.message_id = 'msg-1'
+        mock_queue.receive_messages.return_value = [mock_sqs_message]
+        with patch('sqs_queue.signal'):
+            bulk = Queue(queue=mock_queue)
+            primary = Queue(queue=MagicMock(), bulk_queue=bulk)
+            messages = bulk.receive(consumer_queue=primary)
         self.assertTrue(messages[0].delivered_from_bulk)
 
     def test_receive_primary_queue_messages_not_marked_bulk(self):

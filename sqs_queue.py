@@ -13,6 +13,7 @@ logger = getLogger(__name__)
 
 class Queue(object):
     got_sigterm = False
+    is_bulk = False
 
     def __init__(self, queue_name=None, queue=None, bulk_queue=None,
                  bulk_queue_check_pct=0, poll_wait=20, poll_sleep=40,
@@ -33,6 +34,8 @@ class Queue(object):
 
         self.queue = queue
         self.bulk_queue = bulk_queue
+        if bulk_queue:
+            bulk_queue.is_bulk = True
 
         self.set_from_env('poll_wait', poll_wait)
         self.set_from_env('poll_sleep', poll_sleep)
@@ -171,6 +174,9 @@ class Queue(object):
                 When this queue is polled as another Queue's bulk_queue,
                 pass the primary Queue so Message.defer() can reach its
                 consumer. Defaults to self.
+
+        Messages are marked delivered_from_bulk when this queue was passed
+        as another Queue's bulk_queue.
         """
         owner = consumer_queue if consumer_queue is not None else self
         sqs_messages = self.queue.receive_messages(
@@ -179,13 +185,12 @@ class Queue(object):
             MessageAttributeNames=['All'],
             AttributeNames=['All']
         )
-        delivered_from_bulk = consumer_queue is not None
         messages = []
         for sqs_message in sqs_messages:
             body = self._parse_json(sqs_message)
             if body is not None:
                 messages.append(
-                    Message(body, owner, sqs_message, delivered_from_bulk=delivered_from_bulk)
+                    Message(body, owner, sqs_message, delivered_from_bulk=self.is_bulk)
                 )
         return messages
 
