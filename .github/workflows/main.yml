@@ -22,10 +22,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e . pytest pytest-cov
 
       - name: Run tests
-        run: python -m unittest test -v
+        run: coverage run -m pytest && coverage report --fail-under=100
 
       - name: Backstage entity validator
         uses: RoadieHQ/backstage-entity-validator@v0.6.0
